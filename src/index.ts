@@ -1,6 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 import express from "express";
 
+import { convertHourStringToMinutes } from './utils/convertHourStringToMinutes';
+import { convertMinutesToHourString } from './utils/convertMinutesToHourString';
+
 const prisma = new PrismaClient();
 
 const app = express();
@@ -10,53 +13,98 @@ app.use(express.json());
 app.use(express.raw({ type: "application/vnd.custom-type" }));
 app.use(express.text({ type: "text/html" }));
 
-app.get("/todos", async (req, res) => {
-  const todos = await prisma.todo.findMany({
-    orderBy: { createdAt: "desc" },
-  });
+app.get('/games', async (req, res) => {
+  const games = await prisma.game.findMany({
+      include: {
+          _count: {
+              select: {
+                  ads: true,
+              }
+          }
+      }
+  })
 
-  res.json(todos);
-});
+  return res.status(200).json(games);
+})
 
-app.post("/todos", async (req, res) => {
-  const todo = await prisma.todo.create({
-    data: {
-      completed: false,
-      createdAt: new Date(),
-      text: req.body.text ?? "Empty todo",
-    },
-  });
+app.post('/games/:id/ads', async (req, res) => {
+  const gameId: string = req.params.id;
+  const body = req.body;
 
-  return res.json(todo);
-});
+  try {
+      const ad = await prisma.ad.create({
+          data: {
+              gameId,
+              name: body.name,
+              weekDays: body.weekDays.join(','),
+              useVoiceChannel: body.useVoiceChannel,
+              yearsPlaying: body.yearsPlaying,
+              hourStart: convertHourStringToMinutes(body.hourStart),
+              hourEnd: convertHourStringToMinutes(body.hourEnd),
+              discord: body.discord,
+          }
+      });
+      return res.status(201).json(ad);
+  } catch (error) {
+      return res.status(400).json({ error: "Dados inválidos" });
+  }
+})
 
-app.get("/todos/:id", async (req, res) => {
-  const id = req.params.id;
-  const todo = await prisma.todo.findUnique({
-    where: { id },
-  });
+app.get('/games/:id/ads', async (req, res) => {
+  const gameId = req.params.id;
 
-  return res.json(todo);
-});
+  try {
+      const ads = await prisma.ad.findMany({
+          select: {
+              id: true,
+              name: true,
+              weekDays: true,
+              useVoiceChannel: true,
+              yearsPlaying: true,
+              hourStart: true,
+              hourEnd: true,
+          },
+          where: {
+              gameId,
+          },
+          orderBy: {
+              createdAt: 'desc',
+          }
+      });
 
-app.put("/todos/:id", async (req, res) => {
-  const id = req.params.id;
-  const todo = await prisma.todo.update({
-    where: { id },
-    data: req.body,
-  });
+      return res.status(200).json(ads.map(ad => {
+          return {
+              ...ad,
+              weekDays: ad.weekDays.split(','),
+              hourStart: convertMinutesToHourString(ad.hourStart),
+              hourEnd: convertMinutesToHourString(ad.hourEnd),
+          }
+      }));
+  } catch (error) {
+      return res.status(400).json({ error: "Jogo inválido" });
+  }
+})
 
-  return res.json(todo);
-});
+app.get('/ads/:id/discord', async (req, res) => {
+  const adId = req.params.id;
 
-app.delete("/todos/:id", async (req, res) => {
-  const id = req.params.id;
-  await prisma.todo.delete({
-    where: { id },
-  });
+  try {
+      const ad = await prisma.ad.findUniqueOrThrow({
+          select: {
+              discord: true,
+          },
+          where: {
+              id: adId,
+          }
 
-  return res.send({ status: "ok" });
-});
+      })
+
+      return res.status(200).json(ad);
+  } catch (error) {
+      return res.status(400).json({ error: "Anúncio inválido" });
+  }
+
+})
 
 app.get("/", async (req, res) => {
   res.send(
